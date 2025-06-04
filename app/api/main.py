@@ -51,7 +51,7 @@ MODEL_METRIC_TYPES = {
     "random_forest": "classification"
 }
 
-def compute_metrics(y_true, y_pred, metric_type, unique_labels=None):   
+def compute_metrics(y_true, y_pred, metric_type, sorted_labels_for_confusion=None):    
     """Compute metrics for a given metric type."""
     if metric_type not in METRIC_CONFIGS:
         logger.error(f"Invalid metric type: {metric_type}")
@@ -64,21 +64,27 @@ def compute_metrics(y_true, y_pred, metric_type, unique_labels=None):
             logger.info(f"Computed {metric_name}: {metrics[metric_name]}")
         except Exception as e:
             logger.error(f"Error computing {metric_name}: {str(e)}")
-            metrics[metric_name] = "N/A"  # Include error in output for debugging
+            metrics[metric_name] = f"Error: {str(e)}"
     
     # Compute confusion matrix for classification
     confusion_matrix_data = None
     if metric_type == "classification":
-        try:
-            cm = confusion_matrix(y_true, y_pred, labels=unique_labels)
-            confusion_matrix_data = cm.tolist()  # Convert to list for JSON serialization
-            logger.info(f"Computed confusion matrix: {confusion_matrix_data}")
-        except Exception as e:
-            logger.error(f"Error computing confusion matrix: {str(e)}")
-            confusion_matrix_data = None
+        if sorted_labels_for_confusion is None: # Should ideally always be provided for consistency
+            # Fallback if not provided, but it's better to always provide sorted labels
+            logger.warning("sorted_labels_for_cm not provided for confusion matrix, inferring from y_true and y_pred.")
+            all_present_labels = sorted(list(pd.unique(np.concatenate((y_true, y_pred)))))
+            cm = confusion_matrix(y_true, y_pred, labels=all_present_labels)
+            logger.info(f"Using inferred labels for CM: {all_present_labels}")
+        else:
+            cm = confusion_matrix(y_true, y_pred, labels=sorted_labels_for_confusion)
+            logger.info(f"Using provided sorted labels for CM: {sorted_labels_for_confusion}")
+        
+        confusion_matrix_data = cm.tolist()
+        logger.info(f"Computed confusion matrix: {confusion_matrix_data}")
 
     logger.info(f"Final metrics: {metrics}")
     return metrics, confusion_matrix_data
+
 
 @app.post("/train")
 async def train_model(file: UploadFile = File(...), model_type: str = None, target_column: str = None):
@@ -102,8 +108,13 @@ async def train_model(file: UploadFile = File(...), model_type: str = None, targ
         # Prepare data
         X = df.drop(columns=[target_column])
         y = df[target_column]
-        unique_labels = y.unique() if model_type in ["logistic_regression", "random_forest"] else None
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y if model_type in ["logistic_regression", "random_forest"] else None)
+
+        unique_labels = None
+        if MODEL_METRIC_TYPES.get(model_type) == "classification":
+            unique_labels = sorted(list(y.unique()))
+        
+        stratify_param = y if MODEL_METRIC_TYPES.get(model_type) == "classification" else None
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=stratify_param)
 
         # Train model
         model = MODELS[model_type]()
@@ -117,7 +128,10 @@ async def train_model(file: UploadFile = File(...), model_type: str = None, targ
 
         # Evaluate model
         y_pred = model.predict(X_test)
-        metric_type = MODEL_METRIC_TYPES.get(model_type, "regression")  # Default to regression if not specified
+        metric_type = MODEL_METRIC_TYPES.get(model_type)
+        if not metric_type: # Should not happen if MODEL_METRIC_TYPES is complete
+            logger.error(f"Metric type not defined for model: {model_type}")
+            raise HTTPException(status_code=500, detail=f"Metric type not defined for model: {model_type}")
         metrics, confusion_matrix_data = compute_metrics(y_test, y_pred, metric_type, unique_labels)
         
         # Save predictions

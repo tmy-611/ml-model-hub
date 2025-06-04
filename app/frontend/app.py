@@ -5,7 +5,7 @@ import os
 import plotly.express as px
 import numpy as np
 
-st.title("ML Model Hub")
+st.title("Machine Learning Model Hub")
 
 MODEL_OPTIONS = {
     "Linear Regression": "linear_regression",
@@ -56,7 +56,7 @@ st.markdown(
 )
 
 # File upload
-uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+uploaded_file = st.file_uploader("Upload a CSV file. All columns must be converted to numerical values before use.", type=["csv"])
 
 # Display dataset preview if a file is uploaded
 if uploaded_file:
@@ -76,8 +76,6 @@ target_column = st.text_input("Enter Target Column Name")
 # Model selection
 model_select = st.selectbox("Select Model", list(MODEL_OPTIONS.keys()))
 
-# Clarify default metrics setting
-st.info("Unconfigured models default to regression metrics (MSE, RMSE, R², MAE).")
 
 # Help section for metrics explanation
 with st.expander("Learn About Model Metrics"):
@@ -119,9 +117,9 @@ if st.button("Train Model"):
                     st.subheader("Confusion Matrix")
                     cm = np.array(result["confusion_matrix"])
                     # Get unique labels from the dataset for axis labels
-                    df = pd.read_csv(uploaded_file)
-                    uploaded_file.seek(0)  # Reset pointer again
-                    labels = sorted(df[target_column].unique())
+                    uploaded_file.seek(0)
+                    df_for_labels = pd.read_csv(uploaded_file)
+                    labels = sorted(df_for_labels[target_column].unique())
                     fig = px.imshow(
                         cm,
                         text_auto=True,
@@ -131,7 +129,6 @@ if st.button("Train Model"):
                         color_continuous_scale="Blues"
                     )
                     fig.update_layout(
-                        title="Confusion Matrix",
                         xaxis_title="Predicted Label",
                         yaxis_title="Actual Label"
                     )
